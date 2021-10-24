@@ -8,9 +8,12 @@ package main
 import (
 	"crypto/tls"
 	"encoding/base64"
+	"flag"
 	"log"
 	"net/http"
+	"strings"
 
+	mp "github.com/mackerelio/go-mackerel-plugin"
 	"github.com/ybbus/jsonrpc/v2"
 )
 
@@ -99,6 +102,65 @@ func doCall(endpoint, username, password string) []*CallResult {
 	return ret
 }
 
+type RaritanPlugin struct {
+	Endpoint, Username, Password, Prefix string
+}
+
+func (n RaritanPlugin) GraphDefinition() map[string]mp.Graphs {
+	labelPrefix := strings.Title(n.MetricKeyPrefix())
+	return map[string]mp.Graphs{
+		"ApparentPower": {
+			Label: labelPrefix + " Apparent Power",
+			Unit:  mp.UnitFloat,
+			Metrics: []mp.Metrics{
+				{Name: "ApparentPower", Label: "VA"},
+			},
+		},
+		"ActivePower": {
+			Label: labelPrefix + " Active Power",
+			Unit:  mp.UnitFloat,
+			Metrics: []mp.Metrics{
+				{Name: "ActivePower", Label: "Watts"},
+			},
+		},
+	}
+}
+
+func (n RaritanPlugin) FetchMetrics() (map[string]float64, error) {
+	ret := doCall(n.Endpoint, n.Username, n.Password)
+	kv := make(map[string]float64)
+
+	for i := range ret {
+		kv[ret[i].Caption] = ret[i].Value
+	}
+
+	return kv, nil
+}
+
+func (n RaritanPlugin) MetricKeyPrefix() string {
+	if n.Prefix == "" {
+		n.Prefix = "raritan"
+	}
+	return n.Prefix
+}
+
 func main() {
-	log.Printf("%#v", doCall("192.0.2.1", "***********", "************"))
+
+	optEndpoint := flag.String("endpoint", "localhost", "raritan endpoint")
+	optUsername := flag.String("username", "admin", "username")
+	optPassword := flag.String("password", "raritan", "password")
+
+	optPrefix := flag.String("metric-key-prefix", "raritan", "Metric key prefix")
+	optTempfile := flag.String("tempfile", "", "Temp file name")
+	flag.Parse()
+
+	n := RaritanPlugin{
+		Endpoint: *optEndpoint,
+		Username: *optUsername,
+		Password: *optPassword,
+		Prefix:   *optPrefix,
+	}
+	plugin := mp.NewMackerelPlugin(n)
+	plugin.Tempfile = *optTempfile
+	plugin.Run()
 }
